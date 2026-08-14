@@ -39,14 +39,19 @@ export function BottlingRunScreen() {
       return;
     }
     try {
-      const run = await api.post<{ mismatchFlag: boolean }>("/bottling-runs", {
-        chillerId,
-        manualCount: Number(manualCount) || scannedQrs.length,
-        cameraCount: cameraCount ? Number(cameraCount) : undefined,
-        containers: scannedQrs.map((qrCode) => ({ qrCode, containerType, variant })),
-      });
+      const run = await api.post<{ mismatchFlag: boolean; refilledWithoutReturn: string[] }>(
+        "/bottling-runs",
+        {
+          chillerId,
+          manualCount: Number(manualCount) || scannedQrs.length,
+          cameraCount: cameraCount ? Number(cameraCount) : undefined,
+          containers: scannedQrs.map((qrCode) => ({ qrCode, containerType, variant })),
+        },
+      );
       if (run.mismatchFlag) Alert.alert(t("bottleMismatch"));
-      else Alert.alert(t("success"));
+      else if (run.refilledWithoutReturn.length > 0) {
+        Alert.alert(`${t("refilledWithoutReturn")}: ${run.refilledWithoutReturn.join(", ")}`);
+      } else Alert.alert(t("success"));
       setScannedQrs([]);
       setManualCount("");
       setCameraCount("");

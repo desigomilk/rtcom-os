@@ -266,18 +266,71 @@ export default async function traceabilityRoutes(fastify: FastifyInstance) {
       const mismatchFlag =
         body.cameraCount !== undefined && body.cameraCount !== body.manualCount;
 
-      const run = await prisma.bottlingRun.create({
-        data: {
-          chillerId: body.chillerId,
-          manualCount: body.manualCount,
-          cameraCount: body.cameraCount,
-          mismatchFlag,
-          staffId: request.user.sub,
-          containers: { create: body.containers },
-        },
-        include: { containers: true },
+      // Containers are physical, reusable bottles/barrels — the same qrCode
+      // gets filled many times over its life (wash -> refill -> deliver ->
+      // return -> wash again), so this must upsert by qrCode rather than
+      // always creating a new row (which would fail on the unique qrCode
+      // constraint the very first time a bottle came back for a refill).
+      // A container found mid-cycle (still DELIVERED/IN_TRANSIT) getting
+      // refilled anyway is flagged, not blocked — the empty-return step was
+      // likely skipped somewhere, which is exactly the kind of gap this
+      // system should surface rather than silently paper over.
+      const result = await prisma.$transaction(async (tx) => {
+        const run = await tx.bottlingRun.create({
+          data: {
+            chillerId: body.chillerId,
+            manualCount: body.manualCount,
+            cameraCount: body.cameraCount,
+            mismatchFlag,
+            staffId: request.user.sub,
+          },
+        });
+
+        const containers = await Promise.all(
+          body.containers.map(async (c) => {
+            const existing = await tx.container.findUnique({ where: { qrCode: c.qrCode } });
+            const refilledWithoutReturn =
+              !!existing && !["FILLED", "RETURNED", "LOST"].includes(existing.status);
+
+            const container = await tx.container.upsert({
+              where: { qrCode: c.qrCode },
+              create: {
+                qrCode: c.qrCode,
+                containerType: c.containerType,
+                variant: c.variant,
+                sealColor: c.sealColor,
+                status: "FILLED",
+                bottlingRunId: run.id,
+              },
+              update: {
+                containerType: c.containerType,
+                variant: c.variant,
+                sealColor: c.sealColor,
+                status: "FILLED",
+                bottlingRunId: run.id,
+                currentCustomerId: null,
+              },
+            });
+            return { container, refilledWithoutReturn };
+          }),
+        );
+
+        return { run, containers };
       });
-      return reply.code(201).send(run);
+
+      const anomalies = result.containers.filter((c) => c.refilledWithoutReturn);
+      if (anomalies.length > 0) {
+        fastify.log.warn(
+          { qrCodes: anomalies.map((a) => a.container.qrCode) },
+          "Container(s) refilled without going through an empty-return scan first",
+        );
+      }
+
+      return reply.code(201).send({
+        ...result.run,
+        containers: result.containers.map((c) => c.container),
+        refilledWithoutReturn: anomalies.map((a) => a.container.qrCode),
+      });
     },
   );
 

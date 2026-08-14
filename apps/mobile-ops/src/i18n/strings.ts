@@ -35,6 +35,10 @@ export const STRINGS = {
     hi: "मैनुअल और कैमरा गिनती मेल नहीं खाती!",
   },
   success: { en: "Saved successfully", hi: "सफलतापूर्वक सहेजा गया" },
+  refilledWithoutReturn: {
+    en: "Warning: refilled without an empty-return scan",
+    hi: "चेतावनी: बिना खाली-वापसी स्कैन के दोबारा भरा गया",
+  },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
