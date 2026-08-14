@@ -12,6 +12,7 @@ import geographyRoutes from "./routes/geography";
 import leadRoutes from "./routes/leads";
 import messageRoutes from "./routes/messages";
 import routesManagementRoutes from "./routes/routes-management";
+import traceabilityRoutes from "./routes/traceability";
 import userRoutes from "./routes/users";
 
 export function buildApp() {
@@ -49,6 +50,7 @@ export function buildApp() {
   app.register(userRoutes);
   app.register(billingRoutes);
   app.register(accountingRoutes);
+  app.register(traceabilityRoutes);
 
   return app;
 }
