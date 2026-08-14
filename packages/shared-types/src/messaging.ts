@@ -25,7 +25,7 @@ export const parsedIntentSchema = z.object({
 export type ParsedIntentInput = z.infer<typeof parsedIntentSchema>;
 
 export const pauseSubscriptionPayloadSchema = z.object({
-  subscriptionId: z.string(),
+  customerId: z.string(),
   fromDate: z.string().date(),
   toDate: z.string().date(),
 });
@@ -33,8 +33,17 @@ export type PauseSubscriptionPayload = z.infer<
   typeof pauseSubscriptionPayloadSchema
 >;
 
+export const resumeSubscriptionPayloadSchema = z.object({
+  customerId: z.string(),
+  fromDate: z.string().date(),
+  toDate: z.string().date(),
+});
+export type ResumeSubscriptionPayload = z.infer<
+  typeof resumeSubscriptionPayloadSchema
+>;
+
 export const changeQuantityPayloadSchema = z.object({
-  subscriptionId: z.string(),
+  customerId: z.string(),
   newDailyQuantityLitres: z.number().positive(),
   effectiveFrom: z.string().date(),
 });
@@ -43,7 +52,7 @@ export type ChangeQuantityPayload = z.infer<
 >;
 
 export const addExtraPayloadSchema = z.object({
-  subscriptionId: z.string(),
+  customerId: z.string(),
   date: z.string().date(),
   extraQuantityLitres: z.number().positive(),
 });

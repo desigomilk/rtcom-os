@@ -41,6 +41,11 @@ enum SubscriptionStatus {
   PAUSED
 }
 
+enum DeliveryExceptionType {
+  PAUSE
+  EXTRA
+}
+
 enum DeliveryStopStatus {
   PENDING
   COMPLETE
@@ -124,14 +129,14 @@ model User {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  farmMilkEntries   FarmMilkEntry[]             @relation("EnteredBy")
-  plantReceipts     PlantReceipt[]              @relation("ReceivedBy")
-  bottlingRuns      BottlingRun[]               @relation("RunBy")
-  deliveryLogs      DeliveryLog[]               @relation("DeliveryBoy")
-  handedOverLogs    DeliveryLog[]               @relation("HandedOverFrom")
+  farmMilkEntries      FarmMilkEntry[]                @relation("EnteredBy")
+  plantReceipts        PlantReceipt[]                 @relation("ReceivedBy")
+  bottlingRuns         BottlingRun[]                  @relation("RunBy")
+  deliveryLogs         DeliveryLog[]                  @relation("DeliveryBoy")
+  handedOverLogs       DeliveryLog[]                  @relation("HandedOverFrom")
   emptyContainerRecons EmptyContainerReconciliation[] @relation("ReconDeliveryBoy")
-  qrReassignments   ContainerQrReassignment[]   @relation("ReassignedBy")
-  assignedLeads     Lead[]                      @relation("AssignedTo")
+  qrReassignments      ContainerQrReassignment[]      @relation("ReassignedBy")
+  assignedLeads        Lead[]                         @relation("AssignedTo")
 }
 
 // ---------- Geography / Routes ----------
@@ -332,13 +337,14 @@ model Customer {
   route     Route?   @relation(fields: [routeId], references: [id])
   createdAt DateTime @default(now())
 
-  currentContainers Container[]
-  routeStops        RouteStop[]
-  subscriptions     Subscription[]
-  invoices          Invoice[]
-  penaltyCharges    PenaltyCharge[]
-  messages          CustomerMessage[]
-  convertedFromLead Lead?
+  currentContainers      Container[]
+  routeStops             RouteStop[]
+  subscriptions          Subscription[]
+  deliveryDateExceptions DeliveryDateException[]
+  invoices               Invoice[]
+  penaltyCharges         PenaltyCharge[]
+  messages               CustomerMessage[]
+  convertedFromLead      Lead?
 }
 
 model RouteStop {
@@ -358,6 +364,10 @@ model RouteStop {
   @@index([routeId, sequence])
 }
 
+// A customer's subscription is versioned: a quantity change creates a new row
+// with a future effectiveFrom rather than mutating the existing one, so the
+// "what was the plan on date X" question always has a clean answer. The
+// "current" plan for a date is the latest row with effectiveFrom <= that date.
 model Subscription {
   id                  String             @id @default(cuid())
   customerId          String
@@ -365,10 +375,26 @@ model Subscription {
   dailyQuantityLitres Decimal
   status              SubscriptionStatus @default(ACTIVE)
   effectiveFrom       DateTime
-  pausedDates         Json? // list of ISO dates this subscription is paused
   createdAt           DateTime           @default(now())
 
   @@index([customerId, effectiveFrom])
+}
+
+// Per-date calendar exception layered on top of the customer's current Subscription:
+// PAUSE means zero delivery that date, EXTRA means the base quantity plus
+// extraQuantityLitres. Keeping this keyed by customer+date (not by a specific
+// Subscription row) means a pause scheduled before a later quantity change
+// still applies correctly.
+model DeliveryDateException {
+  id                  String                @id @default(cuid())
+  customerId          String
+  customer            Customer              @relation(fields: [customerId], references: [id])
+  date                DateTime              @db.Date
+  type                DeliveryExceptionType
+  extraQuantityLitres Decimal? // only set when type = EXTRA
+  createdAt           DateTime              @default(now())
+
+  @@unique([customerId, date])
 }
 
 model DeliveryLog {
@@ -512,21 +538,21 @@ model CustomerMessage {
 }
 
 model ParsedIntent {
-  id         String           @id @default(cuid())
+  id         String          @id @default(cuid())
   messageId  String
-  message    CustomerMessage  @relation(fields: [messageId], references: [id])
+  message    CustomerMessage @relation(fields: [messageId], references: [id])
   intentType String // e.g. "PAUSE_SUBSCRIPTION", "ADD_EXTRA"
   payload    Json
-  status     IntentStatus     @default(PENDING_CONFIRMATION)
-  createdAt  DateTime         @default(now())
+  status     IntentStatus    @default(PENDING_CONFIRMATION)
+  createdAt  DateTime        @default(now())
 
   confirmation IntentConfirmation?
 }
 
 model IntentConfirmation {
-  id                  String       @id @default(cuid())
-  parsedIntentId      String       @unique
-  parsedIntent        ParsedIntent @relation(fields: [parsedIntentId], references: [id])
+  id                  String         @id @default(cuid())
+  parsedIntentId      String         @unique
+  parsedIntent        ParsedIntent   @relation(fields: [parsedIntentId], references: [id])
   confirmedAt         DateTime?
   confirmationChannel MessageChannel @default(WHATSAPP)
 }

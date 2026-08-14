@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@fastify/jwt": "^9.0.3",
+    "@rtcom/business-rules": "workspace:*",
     "@rtcom/db": "workspace:*",
     "@rtcom/shared-types": "workspace:*",
     "bcryptjs": "^2.4.3",
