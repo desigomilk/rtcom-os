@@ -3,6 +3,7 @@ import Fastify, { type FastifyError } from "fastify";
 import { ZodError } from "zod";
 import authPlugin from "./plugins/auth";
 import authRoutes from "./routes/auth";
+import deliveryRoutes from "./routes/delivery";
 import leadRoutes from "./routes/leads";
 import messageRoutes from "./routes/messages";
 
@@ -32,6 +33,7 @@ export function buildApp() {
   app.register(authRoutes);
   app.register(leadRoutes);
   app.register(messageRoutes);
+  app.register(deliveryRoutes);
 
   return app;
 }

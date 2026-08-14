@@ -137,6 +137,7 @@ model User {
   emptyContainerRecons EmptyContainerReconciliation[] @relation("ReconDeliveryBoy")
   qrReassignments      ContainerQrReassignment[]      @relation("ReassignedBy")
   assignedLeads        Lead[]                         @relation("AssignedTo")
+  routeAssignments     RouteAssignment[]              @relation("RouteAssignmentDeliveryBoy")
 }
 
 // ---------- Geography / Routes ----------
@@ -167,8 +168,25 @@ model Route {
   areaId String?
   area   Area?   @relation(fields: [areaId], references: [id])
 
-  stops     RouteStop[]
-  customers Customer[]
+  stops       RouteStop[]
+  customers   Customer[]
+  assignments RouteAssignment[]
+}
+
+// Which delivery boy owns a route on a given day. A mid-route handover (backup
+// rider takes over) just repoints deliveryBoyId — the DeliveryLogs already
+// submitted keep their original deliveryBoyId, and new ones from the backup
+// rider record handedOverFromDeliveryBoyId so the handover is traceable.
+model RouteAssignment {
+  id            String   @id @default(cuid())
+  routeId       String
+  route         Route    @relation(fields: [routeId], references: [id])
+  deliveryBoyId String
+  deliveryBoy   User     @relation("RouteAssignmentDeliveryBoy", fields: [deliveryBoyId], references: [id])
+  date          DateTime @db.Date
+  createdAt     DateTime @default(now())
+
+  @@unique([routeId, date])
 }
 
 // ---------- Farm -> Batch -> Plant traceability ----------

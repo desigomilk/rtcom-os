@@ -1,0 +1,50 @@
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { useState } from "react";
+import { Button, StyleSheet, Text, View } from "react-native";
+
+interface Props {
+  onScanned: (data: string) => void;
+  prompt: string;
+}
+
+// One-shot scanner: fires onScanned once per mount, then requires the parent
+// to unmount/remount it (e.g. behind a modal) for the next scan — avoids
+// firing a burst of duplicate reads while a QR code stays in frame.
+export function QrScanner({ onScanned, prompt }: Props) {
+  const [permission, requestPermission] = useCameraPermissions();
+  const [hasScanned, setHasScanned] = useState(false);
+
+  if (!permission) return <View />;
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.text}>Camera access chahiye QR scan karne ke liye.</Text>
+        <Button title="Allow camera" onPress={requestPermission} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.prompt}>{prompt}</Text>
+      <CameraView
+        style={styles.camera}
+        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+        onBarcodeScanned={({ data }) => {
+          if (hasScanned) return;
+          setHasScanned(true);
+          onScanned(data);
+        }}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  camera: { flex: 1 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", padding: 24, gap: 12 },
+  text: { textAlign: "center" },
+  prompt: { textAlign: "center", padding: 12, fontWeight: "600" },
+});
