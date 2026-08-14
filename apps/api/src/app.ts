@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth";
 import billingRoutes from "./routes/billing";
 import customerRoutes from "./routes/customers";
 import deliveryRoutes from "./routes/delivery";
+import deviceRoutes from "./routes/devices";
 import geographyRoutes from "./routes/geography";
 import leadRoutes from "./routes/leads";
 import messageRoutes from "./routes/messages";
@@ -51,6 +52,7 @@ export function buildApp() {
   app.register(billingRoutes);
   app.register(accountingRoutes);
   app.register(traceabilityRoutes);
+  app.register(deviceRoutes);
 
   return app;
 }

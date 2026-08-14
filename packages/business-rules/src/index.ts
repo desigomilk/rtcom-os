@@ -7,3 +7,4 @@ export * from "./apply-intent";
 export * from "./billing";
 export * from "./accounting";
 export * from "./reconciliation";
+export * from "./devices";

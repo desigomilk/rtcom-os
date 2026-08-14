@@ -1,4 +1,5 @@
 import {
+  applyDailyUnreturnedPenalties,
   applyFlatPenalty,
   generateInvoice,
   issueInvoice,
@@ -59,6 +60,14 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       .parse(request.body);
     const penalty = await applyFlatPenalty(body.customerId, body.type, body.notes);
     return reply.code(201).send(penalty);
+  });
+
+  // Idempotent per (customer, container, day) — safe to trigger repeatedly
+  // from an external cron for the given date.
+  fastify.post("/billing/apply-daily-penalties", async (request) => {
+    const body = z.object({ date: z.string().date() }).parse(request.body);
+    const charges = await applyDailyUnreturnedPenalties(new Date(body.date));
+    return { applied: charges.length };
   });
 
   fastify.post("/billing/reconcile", async (request) => {

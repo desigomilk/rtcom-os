@@ -553,6 +553,10 @@ model Device {
   location     String
   status       DeviceStatus @default(OFFLINE)
   lastSeenAt   DateTime?
+  // SHA-256 of the device's issued API key — devices authenticate their own
+  // readings webhook with this (not a user JWT), so a fast deterministic hash
+  // is used instead of bcrypt, which is deliberately slow for password hashing.
+  apiKeyHash   String?      @unique
   createdAt    DateTime     @default(now())
 
   readings DeviceReading[]
