@@ -103,8 +103,9 @@ pnpm exec turbo run test        # business-rules integration/unit tests
   **Needs `ANTHROPIC_API_KEY`** in `apps/api/.env` to actually parse
   messages; the confirm/apply/cutoff-rejection pipeline works today without
   it (tested via a dev-only script that simulates a parsed intent).
-- **Delivery**: route assignment, offline-first scan flow (QR scan, GPS,
-  empty-container count, manual override for damaged QR, backup-rider
+- **Delivery**: route assignment, offline-first scan flow (QR scan per
+  filled container *and* per returned empty — both individually traced, not
+  just counted — plus GPS, manual override for damaged QR, backup-rider
   handover), sync with idempotent replay.
 - **Billing**: day-by-day invoice generation (quantity × rate, honoring
   subscription versions and per-date pause/extra exceptions), issue, record
@@ -118,30 +119,56 @@ pnpm exec turbo run test        # business-rules integration/unit tests
 - **Traceability**: farm milk entry → batch → plant receipt (auto-flags a
   farm/plant quality mismatch) → chiller blend (tracks % composition per
   farm) → bottling run (auto-flags a manual-vs-camera count mismatch) →
-  containers.
+  containers. Containers (bottles/barrels/jars) and Barrels (the raw-milk
+  transport vessel) are both reusable physical assets — refilling an
+  existing QR upserts it (resets status, keeps history) rather than
+  erroring or duplicating; refilling one that's still marked out in the
+  field is flagged, not blocked, as a likely skipped-scan signal.
+- **Barrel round trip**: full accountability loop — AT_FARM_EMPTY →
+  AT_FARM_FILLED → IN_TRANSIT_TO_PLANT → AT_PLANT_EMPTIED →
+  IN_TRANSIT_TO_FARM → back to AT_FARM_EMPTY (with which farm it landed
+  at), closing the "kitne barrel gaye, kitne wapas aaye" gap.
+- **Product master**: `Product` table (variant/category/size/price) as the
+  reference catalog, separate from `Container` (a physical instance) and
+  `Subscription.ratePerLitre` (copied at order time, not looked up live, so
+  a price change doesn't retroactively alter past orders).
 - **Hardware/IoT**: device registration issues an API key; devices POST
   readings to a webhook authenticated by that key (not MQTT — no broker
-  infrastructure exists yet, see below); temperature readings outside a
-  safe range are flagged on ingestion; `iot-worker` marks a device OFFLINE
-  if it goes quiet for 10 minutes.
+  infrastructure exists yet, see below). A device can be formally linked to
+  one Chiller or one Barrel (`Device.chillerId`/`barrelId`) so live
+  temp/GPS can be queried directly rather than guessed from a text label.
+  Temperature readings outside a safe range are flagged on ingestion;
+  `iot-worker` marks a device OFFLINE if it goes quiet for 10 minutes.
+- **Live Ops Dashboard** (web app home page, auto-refreshes every 30s):
+  today's cash collected + estimated milk value delivered, delivered vs
+  returned container counts (overall and per route), live temperature for
+  every farm and plant chiller (color-coded safe/unsafe), live barrel
+  status/temperature/GPS, and today's farm+plant quality test results with
+  mismatches surfaced first.
 - **Public trace page**: `/trace/:qrCode` on the web app, no login — a
   customer scanning their bottle's QR sees its farm origin and quality
-  checks.
+  checks. Temperature trail is intentionally left empty for now (see gaps).
+- **Data import**: `apps/api/src/scripts/import-desigo-csv.ts` — idempotent
+  (safe to re-run) import from the business's spreadsheet export. Run via
+  `pnpm run import:desigo-csv` from `apps/api`.
 
 ## Known gaps / deliberately deferred
 
 These were explicit, reasoned scope decisions, not oversights:
 
-- **Real pricing/billing data**: `Subscription.ratePerLitre` defaults to 0.
-  The user (Desigo) will provide real client/billing/location/variant data
-  to import — the schema and billing engine are ready for it.
+- **Real pricing for imported customers**: the July 2026 CSV import set
+  `ratePerLitre` from each order's own `unit_price` where present, but 25
+  customers had no phone (skipped entirely) and some had no price data —
+  check the import report (`/tmp/desigo-import-report.json` from the run,
+  or re-run the script) for exactly which records need manual follow-up.
 - **MQTT for IoT devices**: the plan originally specified MQTT with an HTTP
   fallback; HTTP webhooks became primary since no MQTT broker is deployed.
   Revisit if/when that infrastructure exists.
-- **Device-to-chiller linkage**: `Device.location` is free text, not a
-  formal relation — the public trace page's temperature trail is
-  intentionally left empty rather than fuzzy-matched, since a wrong reading
-  on a customer-facing trust feature is worse than a missing one.
+- **Public trace page's temperature trail**: intentionally left empty — it
+  would need resolving "which chiller/barrel was this container's milk in,
+  and when" precisely enough to pull the right DeviceReadings, which isn't
+  built yet. Device↔Chiller/Barrel linkage itself *is* built (see above);
+  this is specifically about wiring that into the public trace query.
 - **Voice/IVR channel**: `CustomerMessage.channel` supports `VOICE_CALL` and
   the intent pipeline is channel-agnostic, but no telephony provider
   (Exotel/Twilio) integration has been wired up yet.
