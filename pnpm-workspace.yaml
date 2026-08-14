@@ -6,6 +6,8 @@ allowBuilds:
   '@prisma/engines': true
   esbuild: true
   prisma: true
+  unrs-resolver: false
+  sharp: false
 minimumReleaseAgeExclude:
   - '@expo/cli@57.0.15'
   - '@expo/config-plugins@57.0.8'

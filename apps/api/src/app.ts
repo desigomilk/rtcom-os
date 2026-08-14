@@ -1,14 +1,21 @@
+import cors from "@fastify/cors";
 import { BusinessRuleError } from "@rtcom/business-rules";
 import Fastify, { type FastifyError } from "fastify";
 import { ZodError } from "zod";
 import authPlugin from "./plugins/auth";
 import authRoutes from "./routes/auth";
+import customerRoutes from "./routes/customers";
 import deliveryRoutes from "./routes/delivery";
+import geographyRoutes from "./routes/geography";
 import leadRoutes from "./routes/leads";
 import messageRoutes from "./routes/messages";
+import routesManagementRoutes from "./routes/routes-management";
+import userRoutes from "./routes/users";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
+
+  app.register(cors, { origin: true });
 
   app.setErrorHandler(
     (error: FastifyError | ZodError | BusinessRuleError, _request, reply) => {
@@ -34,6 +41,10 @@ export function buildApp() {
   app.register(leadRoutes);
   app.register(messageRoutes);
   app.register(deliveryRoutes);
+  app.register(customerRoutes);
+  app.register(geographyRoutes);
+  app.register(routesManagementRoutes);
+  app.register(userRoutes);
 
   return app;
 }

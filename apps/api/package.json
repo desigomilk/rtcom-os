@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@fastify/cors": "^10.0.2",
     "@fastify/jwt": "^9.0.3",
     "@rtcom/business-rules": "workspace:*",
     "@rtcom/db": "workspace:*",

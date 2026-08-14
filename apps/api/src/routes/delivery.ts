@@ -37,6 +37,40 @@ export default async function deliveryRoutes(fastify: FastifyInstance) {
     },
   );
 
+  fastify.get(
+    "/delivery/route-assignments",
+    { preHandler: fastify.requireRole("ERP_ADMIN") },
+    async (request) => {
+      const query = z.object({ date: z.string().date() }).parse(request.query);
+      return prisma.routeAssignment.findMany({
+        where: { date: new Date(query.date) },
+        include: { route: true, deliveryBoy: { select: { id: true, name: true, phone: true } } },
+      });
+    },
+  );
+
+  fastify.get(
+    "/delivery/logs",
+    { preHandler: fastify.requireRole("ERP_ADMIN") },
+    async (request) => {
+      const query = z
+        .object({ date: z.string().date(), routeId: z.string().optional() })
+        .parse(request.query);
+      return prisma.deliveryLog.findMany({
+        where: {
+          date: new Date(query.date),
+          ...(query.routeId ? { routeStop: { routeId: query.routeId } } : {}),
+        },
+        include: {
+          routeStop: { include: { customer: true } },
+          deliveryBoy: { select: { id: true, name: true } },
+          containerScans: { include: { container: true } },
+        },
+        orderBy: { scannedAt: "asc" },
+      });
+    },
+  );
+
   // Mid-route handover to a backup rider: repoints the day's assignment.
   // Stops already logged keep their original deliveryBoyId; new DeliveryLog
   // entries from the backup rider carry handedOverFromDeliveryBoyId (set by
