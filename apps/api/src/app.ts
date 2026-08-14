@@ -12,6 +12,7 @@ import deviceRoutes from "./routes/devices";
 import geographyRoutes from "./routes/geography";
 import leadRoutes from "./routes/leads";
 import messageRoutes from "./routes/messages";
+import publicRoutes from "./routes/public";
 import routesManagementRoutes from "./routes/routes-management";
 import traceabilityRoutes from "./routes/traceability";
 import userRoutes from "./routes/users";
@@ -53,6 +54,7 @@ export function buildApp() {
   app.register(accountingRoutes);
   app.register(traceabilityRoutes);
   app.register(deviceRoutes);
+  app.register(publicRoutes);
 
   return app;
 }
