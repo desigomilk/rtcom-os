@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { ActivityIndicator, View } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
+import { BarrelsScreen } from "../screens/BarrelsScreen";
 import { BatchesScreen } from "../screens/BatchesScreen";
 import { BottlingRunScreen } from "../screens/BottlingRunScreen";
 import { ChillerBlendScreen } from "../screens/ChillerBlendScreen";
@@ -36,6 +37,7 @@ export function RootNavigator() {
             options={{ title: t("farmMilkEntry") }}
           />
           <Stack.Screen name="Batches" component={BatchesScreen} options={{ title: t("batches") }} />
+          <Stack.Screen name="Barrels" component={BarrelsScreen} options={{ title: t("barrels") }} />
           <Stack.Screen
             name="ChillerBlend"
             component={ChillerBlendScreen}

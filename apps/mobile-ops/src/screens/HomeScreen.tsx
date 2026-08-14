@@ -22,6 +22,7 @@ export function HomeScreen({ navigation }: Props) {
         <Button title={t("farmMilkEntry")} onPress={() => navigation.navigate("FarmMilkEntry")} />
       )}
       <Button title={t("batches")} onPress={() => navigation.navigate("Batches")} />
+      <Button title={t("barrels")} onPress={() => navigation.navigate("Barrels")} />
       {canPlant && (
         <>
           <Button title={t("chillerBlend")} onPress={() => navigation.navigate("ChillerBlend")} />

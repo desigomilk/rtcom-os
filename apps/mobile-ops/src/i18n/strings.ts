@@ -15,6 +15,11 @@ export const STRINGS = {
   submit: { en: "Submit", hi: "जमा करें" },
   createBatch: { en: "Create new batch", hi: "नया बैच बनाएं" },
   batchQr: { en: "Batch QR code", hi: "बैच क्यूआर कोड" },
+  barrels: { en: "Barrels", hi: "बैरल" },
+  scanBarrelToStartBatch: { en: "Scan barrel to start batch", hi: "बैच शुरू करने के लिए बैरल स्कैन करें" },
+  scanBarrel: { en: "Scan barrel QR", hi: "बैरल क्यूआर स्कैन करें" },
+  barrelDispatchToFarm: { en: "Send empty barrel to farm", hi: "खाली बैरल फार्म भेजें" },
+  barrelArriveAtFarm: { en: "Confirm barrel arrived at farm", hi: "बैरल फार्म पर पहुंचा, पुष्टि करें" },
   dispatch: { en: "Dispatch", hi: "रवाना करें" },
   receiveAtPlant: { en: "Receive at plant", hi: "प्लांट पर प्राप्त करें" },
   mismatchAlert: {

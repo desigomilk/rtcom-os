@@ -1,5 +1,6 @@
 import { prisma } from "@rtcom/db";
 import {
+  barrelStatusSchema,
   batchStatusSchema,
   containerStatusSchema,
   containerTypeSchema,
@@ -77,8 +78,24 @@ export default async function traceabilityRoutes(fastify: FastifyInstance) {
     "/batches",
     { preHandler: fastify.requireRole("FARM_STAFF", "ERP_ADMIN") },
     async (request, reply) => {
-      const body = z.object({ qrCode: z.string().min(1) }).parse(request.body);
-      const batch = await prisma.batch.create({ data: { qrCode: body.qrCode } });
+      const body = z
+        .object({ qrCode: z.string().min(1), barrelQrCode: z.string().min(1).optional() })
+        .parse(request.body);
+
+      const batch = await prisma.$transaction(async (tx) => {
+        let barrelId: string | undefined;
+        if (body.barrelQrCode) {
+          // Barrels are reusable physical assets, same as containers — upsert
+          // by qrCode rather than assuming this is the barrel's first trip.
+          const barrel = await tx.barrel.upsert({
+            where: { qrCode: body.barrelQrCode },
+            create: { qrCode: body.barrelQrCode, status: "AT_FARM_FILLED" },
+            update: { status: "AT_FARM_FILLED" },
+          });
+          barrelId = barrel.id;
+        }
+        return tx.batch.create({ data: { qrCode: body.qrCode, barrelId } });
+      });
       return reply.code(201).send(batch);
     },
   );
@@ -112,10 +129,21 @@ export default async function traceabilityRoutes(fastify: FastifyInstance) {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const batch = await prisma.batch.findUnique({ where: { id } });
       if (!batch) return reply.code(404).send({ error: "Batch not found" });
-      return prisma.batch.update({
-        where: { id },
-        data: { status: "IN_TRANSIT", dispatchedAt: new Date() },
-      });
+      const [updated] = await prisma.$transaction([
+        prisma.batch.update({
+          where: { id },
+          data: { status: "IN_TRANSIT", dispatchedAt: new Date() },
+        }),
+        ...(batch.barrelId
+          ? [
+              prisma.barrel.update({
+                where: { id: batch.barrelId },
+                data: { status: "IN_TRANSIT_TO_PLANT" },
+              }),
+            ]
+          : []),
+      ]);
+      return updated;
     },
   );
 
@@ -164,15 +192,85 @@ export default async function traceabilityRoutes(fastify: FastifyInstance) {
           },
         }),
         prisma.batch.update({ where: { id }, data: { status: "AT_PLANT" } }),
+        ...(batch.barrelId
+          ? [prisma.barrel.update({ where: { id: batch.barrelId }, data: { status: "AT_PLANT_EMPTIED" } })]
+          : []),
       ]);
       return reply.code(201).send(receipt);
+    },
+  );
+
+  // ---------- Barrels (reusable transport vessel round trip) ----------
+
+  fastify.get("/barrels", async (request) => {
+    const query = z.object({ status: barrelStatusSchema.optional() }).parse(request.query);
+    return prisma.barrel.findMany({
+      where: query.status ? { status: query.status } : undefined,
+      include: {
+        currentFarm: true,
+        device: { include: { readings: { orderBy: { recordedAt: "desc" }, take: 1 } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  });
+
+  fastify.post(
+    "/barrels",
+    { preHandler: fastify.requireRole("FARM_STAFF", "PLANT_STAFF", "ERP_ADMIN") },
+    async (request, reply) => {
+      const body = z.object({ qrCode: z.string().min(1) }).parse(request.body);
+      const barrel = await prisma.barrel.upsert({
+        where: { qrCode: body.qrCode },
+        create: { qrCode: body.qrCode },
+        update: {},
+      });
+      return reply.code(201).send(barrel);
+    },
+  );
+
+  // Staff at the plant load washed, empty barrels back onto the truck for
+  // the next farm run.
+  fastify.post(
+    "/barrels/:id/dispatch-to-farm",
+    { preHandler: fastify.requireRole("PLANT_STAFF", "ERP_ADMIN") },
+    async (request, reply) => {
+      const { id } = z.object({ id: z.string() }).parse(request.params);
+      const barrel = await prisma.barrel.findUnique({ where: { id } });
+      if (!barrel) return reply.code(404).send({ error: "Barrel not found" });
+      return prisma.barrel.update({
+        where: { id },
+        data: { status: "IN_TRANSIT_TO_FARM", currentFarmId: null },
+      });
+    },
+  );
+
+  // Farm confirms the empty barrel actually arrived — closes the
+  // accountability loop ("kitne barrel gaye, kitne wapas aaye").
+  fastify.post(
+    "/barrels/:id/arrive-at-farm",
+    { preHandler: fastify.requireRole("FARM_STAFF", "ERP_ADMIN") },
+    async (request, reply) => {
+      const { id } = z.object({ id: z.string() }).parse(request.params);
+      const body = z.object({ farmId: z.string() }).parse(request.body);
+      const barrel = await prisma.barrel.findUnique({ where: { id } });
+      if (!barrel) return reply.code(404).send({ error: "Barrel not found" });
+      return prisma.barrel.update({
+        where: { id },
+        data: { status: "AT_FARM_EMPTY", currentFarmId: body.farmId },
+      });
     },
   );
 
   // ---------- Chillers ----------
 
   fastify.get("/chillers", async () => {
-    return prisma.chiller.findMany({ orderBy: { name: "asc" } });
+    return prisma.chiller.findMany({
+      include: {
+        farm: true,
+        device: { include: { readings: { orderBy: { recordedAt: "desc" }, take: 1 } } },
+      },
+      orderBy: { name: "asc" },
+    });
   });
 
   fastify.post(
@@ -180,7 +278,11 @@ export default async function traceabilityRoutes(fastify: FastifyInstance) {
     { preHandler: fastify.requireRole("PLANT_STAFF", "ERP_ADMIN") },
     async (request, reply) => {
       const body = z
-        .object({ name: z.string().min(1), capacityLitres: z.number().positive() })
+        .object({
+          name: z.string().min(1),
+          capacityLitres: z.number().positive(),
+          farmId: z.string().optional(),
+        })
         .parse(request.body);
       const chiller = await prisma.chiller.create({ data: body });
       return reply.code(201).send(chiller);

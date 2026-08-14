@@ -14,8 +14,9 @@ async function main() {
     process.exit(1);
   }
 
-  const customer = await prisma.customer.findUniqueOrThrow({
+  const customer = await prisma.customer.findFirstOrThrow({
     where: { phone },
+    orderBy: { createdAt: "desc" },
   });
   const message = await prisma.customerMessage.create({
     data: {

@@ -28,8 +28,13 @@ export default async function messageRoutes(fastify: FastifyInstance) {
     const body = inboundWebhookSchema.parse(request.body);
     const receivedAt = body.receivedAt ? new Date(body.receivedAt) : new Date();
 
-    const customer = await prisma.customer.findUnique({
+    // phone is not unique on Customer (one number can cover multiple
+    // delivery profiles — see schema.prisma) — an inbound message applies to
+    // whichever profile was most recently active, since that's the one most
+    // likely to be the live conversation.
+    const customer = await prisma.customer.findFirst({
       where: { phone: body.phone },
+      orderBy: { createdAt: "desc" },
     });
 
     if (!customer) {

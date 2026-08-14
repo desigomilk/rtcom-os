@@ -22,6 +22,18 @@ enum BatchStatus {
   AT_PLANT
 }
 
+// A barrel's full round trip: filled at farm -> trucked to plant -> emptied
+// into a chiller -> trucked back empty -> ready to fill again at (possibly a
+// different) farm. This is the accountability loop the business explicitly
+// called out as a recurring problem ("kitne barrel gaye, kitne wapas aaye").
+enum BarrelStatus {
+  AT_FARM_EMPTY
+  AT_FARM_FILLED
+  IN_TRANSIT_TO_PLANT
+  AT_PLANT_EMPTIED
+  IN_TRANSIT_TO_FARM
+}
+
 enum ContainerType {
   BOTTLE
   BARREL
@@ -51,6 +63,11 @@ enum DeliveryStopStatus {
   COMPLETE
   PARTIAL
   ISSUE
+}
+
+enum DeliveryScanType {
+  DELIVERED
+  RETURNED_EMPTY
 }
 
 enum PaymentMethod {
@@ -143,6 +160,7 @@ model User {
   passwordHash     String
   role             UserRole
   refreshTokenHash String?
+  externalId       String?  @unique // idempotency key for external data import
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -218,6 +236,8 @@ model Farm {
 
   milkEntries   FarmMilkEntry[]
   chillerBlends ChillerBlend[]
+  chillers      Chiller[]
+  barrelsOnSite Barrel[]
 }
 
 model FarmMilkEntry {
@@ -243,10 +263,28 @@ model Batch {
   status       BatchStatus @default(AT_FARM)
   dispatchedAt DateTime?
   createdAt    DateTime    @default(now())
+  barrelId     String?
+  barrel       Barrel?     @relation(fields: [barrelId], references: [id])
 
   farmMilkEntries FarmMilkEntry[]
   plantReceipt    PlantReceipt?
   chillerBlends   ChillerBlend[]
+}
+
+// The physical, reusable barrel — QR-tagged once, trip after trip, distinct
+// from Batch (one day's shipment record: which milk, which tests). Status
+// plus its RTCOM 1B device's readings (temperature/GPS, via Device.barrelId)
+// give live temp+location tracking without duplicating that state here.
+model Barrel {
+  id            String       @id @default(cuid())
+  qrCode        String       @unique
+  status        BarrelStatus @default(AT_FARM_EMPTY)
+  currentFarmId String?
+  currentFarm   Farm?        @relation(fields: [currentFarmId], references: [id])
+  createdAt     DateTime     @default(now())
+
+  batches Batch[]
+  device  Device?
 }
 
 model PlantReceipt {
@@ -263,14 +301,20 @@ model PlantReceipt {
   receivedBy         User     @relation("ReceivedBy", fields: [receivedById], references: [id])
 }
 
+// A chiller at a farm (farmId set — temperature-tracked only, no blending)
+// or at the plant (farmId null — the ones that feed ChillerBlend/BottlingRun).
+// RTCOM 1A units live on both; this is what tells the dashboard which is which.
 model Chiller {
   id             String   @id @default(cuid())
   name           String
   capacityLitres Decimal
+  farmId         String?
+  farm           Farm?    @relation(fields: [farmId], references: [id])
   createdAt      DateTime @default(now())
 
   blends       ChillerBlend[]
   bottlingRuns BottlingRun[]
+  device       Device?
 }
 
 // Tracks what % of a chiller's contents came from which farm/batch at a point in time,
@@ -365,13 +409,21 @@ model Lead {
 // ---------- Customers, Delivery ----------
 
 model Customer {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  address   String
-  routeId   String?
-  route     Route?   @relation(fields: [routeId], references: [id])
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  name       String
+  // Not unique: one phone can legitimately cover multiple delivery profiles
+  // (family members, or an old + new address during a move) — real imported
+  // data confirmed this. Dedup on import uses phone + address/name instead.
+  phone      String
+  address    String
+  areaLabel  String? // raw free-text locality from imported data, not a formal Area/City
+  gpsLat     Decimal?
+  gpsLng     Decimal?
+  routeId    String?
+  route      Route?   @relation(fields: [routeId], references: [id])
+  // Idempotency key for re-running an external data import without duplicating rows.
+  externalId String?  @unique
+  createdAt  DateTime @default(now())
 
   currentContainers      Container[]
   routeStops             RouteStop[]
@@ -412,6 +464,7 @@ model Subscription {
   ratePerLitre        Decimal            @default(0) // placeholder until real pricing data is imported
   status              SubscriptionStatus @default(ACTIVE)
   effectiveFrom       DateTime
+  externalId          String?            @unique // idempotency key for external data import
   createdAt           DateTime           @default(now())
 
   @@index([customerId, effectiveFrom])
@@ -443,6 +496,8 @@ model DeliveryLog {
   date          DateTime           @db.Date
   status        DeliveryStopStatus @default(PENDING)
 
+  // Derived from the count of RETURNED_EMPTY DeliveryContainerScan rows for
+  // this log — kept as a plain column for cheap display, not hand-entered.
   emptyContainersReturned Int @default(0)
 
   scannedLat Decimal?
@@ -466,13 +521,18 @@ model DeliveryLog {
   @@index([deliveryBoyId, date])
 }
 
+// One QR scan during a delivery visit — either a filled container handed to
+// the customer (DELIVERED) or an empty one collected back (RETURNED_EMPTY).
+// Same shape either way; `type` decides what happens to the container's
+// status downstream.
 model DeliveryContainerScan {
-  id            String      @id @default(cuid())
+  id            String           @id @default(cuid())
   deliveryLogId String
-  deliveryLog   DeliveryLog @relation(fields: [deliveryLogId], references: [id])
+  deliveryLog   DeliveryLog      @relation(fields: [deliveryLogId], references: [id])
   containerId   String
-  container     Container   @relation(fields: [containerId], references: [id])
-  scannedAt     DateTime    @default(now())
+  container     Container        @relation(fields: [containerId], references: [id])
+  type          DeliveryScanType @default(DELIVERED)
+  scannedAt     DateTime         @default(now())
 }
 
 model EmptyContainerReconciliation {
@@ -558,6 +618,15 @@ model Device {
   // is used instead of bcrypt, which is deliberately slow for password hashing.
   apiKeyHash   String?      @unique
   createdAt    DateTime     @default(now())
+
+  // A temperature device (RTCOM 1A/1C) is mounted at one chiller; a GPS+temp
+  // tracker (RTCOM 1B) rides on one barrel. Formal links (not just free-text
+  // `location`) so the dashboard can query "latest reading for chiller X" /
+  // "for barrel Y" directly instead of guessing from a label.
+  chillerId String?  @unique
+  chiller   Chiller? @relation(fields: [chillerId], references: [id])
+  barrelId  String?  @unique
+  barrel    Barrel?  @relation(fields: [barrelId], references: [id])
 
   readings DeviceReading[]
 }
@@ -670,4 +739,22 @@ model Expense {
   vendorName        String?
   journalEntryId    String         @unique
   createdAt         DateTime       @default(now())
+}
+
+// ---------- Product master (reference/price list) ----------
+//
+// Distinct from Container: this is the catalog (what variants exist, current
+// price), not a physical instance. Subscription.ratePerLitre is copied from
+// here at order-creation time (or overridden), not looked up live, so a
+// price change doesn't retroactively alter historical orders.
+model Product {
+  id         String   @id @default(cuid())
+  externalId String   @unique
+  name       String
+  variant    String
+  category   String
+  sizeLabel  String?
+  unitPrice  Decimal?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
 }

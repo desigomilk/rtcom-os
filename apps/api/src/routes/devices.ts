@@ -23,7 +23,13 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
 
     staffScope.post("/devices", async (request, reply) => {
       const body = z
-        .object({ type: z.enum(DEVICE_TYPES), serialNumber: z.string().min(1), location: z.string().min(1) })
+        .object({
+          type: z.enum(DEVICE_TYPES),
+          serialNumber: z.string().min(1),
+          location: z.string().min(1),
+          chillerId: z.string().optional(),
+          barrelId: z.string().optional(),
+        })
         .parse(request.body);
 
       const { plainKey, hash } = generateDeviceApiKey();
@@ -36,7 +42,10 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
     });
 
     staffScope.get("/devices", async () => {
-      return prisma.device.findMany({ orderBy: { type: "asc" } });
+      return prisma.device.findMany({
+        include: { chiller: true, barrel: true },
+        orderBy: { type: "asc" },
+      });
     });
 
     staffScope.get("/devices/:id/readings", async (request) => {

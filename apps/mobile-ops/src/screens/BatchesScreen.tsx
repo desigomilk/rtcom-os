@@ -19,6 +19,7 @@ interface Batch {
   id: string;
   qrCode: string;
   status: "AT_FARM" | "IN_TRANSIT" | "AT_PLANT";
+  barrelId: string | null;
 }
 
 const STATUS_COLOR: Record<Batch["status"], string> = {
@@ -45,10 +46,14 @@ export function BatchesScreen() {
     }, [refresh]),
   );
 
-  async function createBatch(qrCode: string) {
+  // A batch is a logical shipment record (auto-generated id), but it's
+  // always tied to a physical, reusable barrel — scanning that barrel's QR
+  // is the real-world action staff take when they start filling it.
+  async function createBatchForBarrel(barrelQrCode: string) {
     setScannerOpen(false);
+    const qrCode = `BATCH-${Crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     try {
-      await api.post("/batches", { qrCode });
+      await api.post("/batches", { qrCode, barrelQrCode });
       refresh();
     } catch (err) {
       Alert.alert(err instanceof ApiError ? err.message : "Failed to create batch");
@@ -84,14 +89,7 @@ export function BatchesScreen() {
 
   return (
     <View style={styles.container}>
-      <Button
-        title={t("createBatch")}
-        onPress={() => {
-          const qrCode = `BATCH-${Crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-          createBatch(qrCode);
-        }}
-      />
-      <Button title={`${t("batchQr")} (scan)`} onPress={() => setScannerOpen(true)} />
+      <Button title={t("scanBarrelToStartBatch")} onPress={() => setScannerOpen(true)} />
 
       <FlatList
         data={batches}
@@ -111,7 +109,7 @@ export function BatchesScreen() {
       />
 
       <Modal visible={scannerOpen} animationType="slide">
-        <QrScanner prompt={t("batchQr")} onScanned={createBatch} />
+        <QrScanner prompt={t("scanBarrelToStartBatch")} onScanned={createBatchForBarrel} />
         <Button title="Cancel" onPress={() => setScannerOpen(false)} />
       </Modal>
 

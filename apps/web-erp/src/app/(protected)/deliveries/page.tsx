@@ -12,7 +12,7 @@ interface DeliveryLog {
   scannedAt: string | null;
   routeStop: { customer: { name: string; address: string } };
   deliveryBoy: { name: string };
-  containerScans: { container: { qrCode: string; variant: string } }[];
+  containerScans: { type: string; container: { qrCode: string; variant: string } }[];
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -86,9 +86,17 @@ export default function DeliveriesPage() {
                   </span>
                 </td>
                 <td className="px-4 py-2 text-gray-500">
-                  {log.containerScans.map((s) => s.container.qrCode).join(", ") || "—"}
+                  {log.containerScans
+                    .filter((s) => s.type === "DELIVERED")
+                    .map((s) => s.container.qrCode)
+                    .join(", ") || "—"}
                 </td>
-                <td className="px-4 py-2">{log.emptyContainersReturned}</td>
+                <td className="px-4 py-2 text-gray-500">
+                  {log.containerScans
+                    .filter((s) => s.type === "RETURNED_EMPTY")
+                    .map((s) => s.container.qrCode)
+                    .join(", ") || (log.emptyContainersReturned > 0 ? `${log.emptyContainersReturned} (pre-scan data)` : "—")}
+                </td>
                 <td className="px-4 py-2 text-gray-500">
                   {log.isManualOverride ? `Override: ${log.overrideReason}` : ""}
                 </td>

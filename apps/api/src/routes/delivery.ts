@@ -196,13 +196,15 @@ export default async function deliveryRoutes(fastify: FastifyInstance) {
         continue;
       }
 
+      const allQrCodes = [
+        ...event.containerScans.map((s) => s.containerQrCode),
+        ...event.emptyContainerScans.map((s) => s.containerQrCode),
+      ];
       const containers = await prisma.container.findMany({
-        where: { qrCode: { in: event.containerScans.map((s) => s.containerQrCode) } },
+        where: { qrCode: { in: allQrCodes } },
       });
-      const foundQrCodes = new Set(containers.map((c) => c.qrCode));
-      const missing = event.containerScans
-        .map((s) => s.containerQrCode)
-        .filter((qr) => !foundQrCodes.has(qr));
+      const containerByQr = new Map(containers.map((c) => [c.qrCode, c]));
+      const missing = allQrCodes.filter((qr) => !containerByQr.has(qr));
       if (missing.length > 0 && !event.isManualOverride) {
         results.push({
           clientEventId: event.clientEventId,
@@ -219,7 +221,7 @@ export default async function deliveryRoutes(fastify: FastifyInstance) {
             deliveryBoyId: event.deliveryBoyId,
             date: new Date(event.date),
             status: event.status,
-            emptyContainersReturned: event.emptyContainersReturned,
+            emptyContainersReturned: event.emptyContainerScans.length,
             scannedLat: event.scannedLat,
             scannedLng: event.scannedLng,
             isManualOverride: event.isManualOverride,
@@ -232,13 +234,27 @@ export default async function deliveryRoutes(fastify: FastifyInstance) {
           },
         });
 
-        for (const container of containers) {
+        for (const scan of event.containerScans) {
+          const container = containerByQr.get(scan.containerQrCode);
+          if (!container) continue; // unknown QR under manual override — nothing to link
           await tx.deliveryContainerScan.create({
-            data: { deliveryLogId: log.id, containerId: container.id },
+            data: { deliveryLogId: log.id, containerId: container.id, type: "DELIVERED" },
           });
           await tx.container.update({
             where: { id: container.id },
             data: { status: "DELIVERED", currentCustomerId: routeStop.customerId },
+          });
+        }
+
+        for (const scan of event.emptyContainerScans) {
+          const container = containerByQr.get(scan.containerQrCode);
+          if (!container) continue;
+          await tx.deliveryContainerScan.create({
+            data: { deliveryLogId: log.id, containerId: container.id, type: "RETURNED_EMPTY" },
+          });
+          await tx.container.update({
+            where: { id: container.id },
+            data: { status: "RETURNED", currentCustomerId: null },
           });
         }
       });

@@ -11,6 +11,15 @@ export type UserRole = z.infer<typeof userRoleSchema>;
 export const batchStatusSchema = z.enum(["AT_FARM", "IN_TRANSIT", "AT_PLANT"]);
 export type BatchStatus = z.infer<typeof batchStatusSchema>;
 
+export const barrelStatusSchema = z.enum([
+  "AT_FARM_EMPTY",
+  "AT_FARM_FILLED",
+  "IN_TRANSIT_TO_PLANT",
+  "AT_PLANT_EMPTIED",
+  "IN_TRANSIT_TO_FARM",
+]);
+export type BarrelStatus = z.infer<typeof barrelStatusSchema>;
+
 export const containerTypeSchema = z.enum(["BOTTLE", "BARREL", "JAR"]);
 export type ContainerType = z.infer<typeof containerTypeSchema>;
 

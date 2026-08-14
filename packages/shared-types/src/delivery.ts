@@ -18,7 +18,15 @@ export const deliverySyncEventSchema = z.object({
       scannedAt: z.string().datetime(),
     }),
   ),
-  emptyContainersReturned: z.number().int().min(0),
+  // Each returned empty is scanned by its own QR, same as a filled delivery
+  // scan — full traceability means knowing which physical bottle came back
+  // from which customer, not just a headcount.
+  emptyContainerScans: z.array(
+    z.object({
+      containerQrCode: z.string(),
+      scannedAt: z.string().datetime(),
+    }),
+  ),
   scannedLat: z.number().min(-90).max(90).optional(),
   scannedLng: z.number().min(-180).max(180).optional(),
   isManualOverride: z.boolean().default(false),

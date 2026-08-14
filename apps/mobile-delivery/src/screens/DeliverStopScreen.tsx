@@ -26,6 +26,7 @@ import {
 import type { RootStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "DeliverStop">;
+type ScanMode = "FILLED" | "EMPTY" | null;
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -35,9 +36,9 @@ export function DeliverStopScreen({ route, navigation }: Props) {
   const { user } = useAuth();
   const { routeStopId } = route.params;
   const [stop, setStop] = useState<LocalManifestStop | null>(null);
-  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanMode, setScanMode] = useState<ScanMode>(null);
   const [scannedContainers, setScannedContainers] = useState<string[]>([]);
-  const [emptyReturned, setEmptyReturned] = useState(0);
+  const [scannedEmpties, setScannedEmpties] = useState<string[]>([]);
   const [isManualOverride, setIsManualOverride] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -46,9 +47,6 @@ export function DeliverStopScreen({ route, navigation }: Props) {
   useEffect(() => {
     getManifestStopsForDate(todayIso()).then((stops) => {
       setStop(stops.find((s) => s.routeStopId === routeStopId) ?? null);
-      setEmptyReturned(
-        stops.find((s) => s.routeStopId === routeStopId)?.expectedEmptyContainers ?? 0,
-      );
     });
     fetchLocation();
   }, [routeStopId]);
@@ -82,10 +80,11 @@ export function DeliverStopScreen({ route, navigation }: Props) {
     const expectedEmpty = stop?.expectedEmptyContainers ?? 0;
     const status = isManualOverride
       ? "ISSUE"
-      : emptyReturned >= expectedEmpty
+      : scannedEmpties.length >= expectedEmpty
         ? "COMPLETE"
         : "PARTIAL";
 
+    const now = new Date().toISOString();
     const event = {
       clientEventId: Crypto.randomUUID(),
       routeStopId,
@@ -94,14 +93,17 @@ export function DeliverStopScreen({ route, navigation }: Props) {
       status,
       containerScans: scannedContainers.map((qr) => ({
         containerQrCode: qr,
-        scannedAt: new Date().toISOString(),
+        scannedAt: now,
       })),
-      emptyContainersReturned: emptyReturned,
+      emptyContainerScans: scannedEmpties.map((qr) => ({
+        containerQrCode: qr,
+        scannedAt: now,
+      })),
       scannedLat: location?.coords.latitude,
       scannedLng: location?.coords.longitude,
       isManualOverride,
       overrideReason: isManualOverride ? overrideReason : undefined,
-      scannedAt: new Date().toISOString(),
+      scannedAt: now,
     };
 
     await enqueueSyncEvent(event.clientEventId, event);
@@ -151,14 +153,15 @@ export function DeliverStopScreen({ route, navigation }: Props) {
       {scannedContainers.map((qr) => (
         <Text key={qr}>• {qr}</Text>
       ))}
-      <Button title="Scan container QR" onPress={() => setScannerOpen(true)} />
+      <Button title="Scan filled container" onPress={() => setScanMode("FILLED")} />
 
-      <Text style={styles.sectionTitle}>Empty containers returned</Text>
-      <View style={styles.row}>
-        <Button title="-" onPress={() => setEmptyReturned((n) => Math.max(0, n - 1))} />
-        <Text style={styles.count}>{emptyReturned}</Text>
-        <Button title="+" onPress={() => setEmptyReturned((n) => n + 1)} />
-      </View>
+      <Text style={styles.sectionTitle}>
+        Empty containers scanned back ({scannedEmpties.length})
+      </Text>
+      {scannedEmpties.map((qr) => (
+        <Text key={qr}>• {qr}</Text>
+      ))}
+      <Button title="Scan empty container" onPress={() => setScanMode("EMPTY")} />
 
       <View style={styles.row}>
         <Text style={styles.sectionTitle}>Issue / damaged QR (manual override)</Text>
@@ -175,15 +178,19 @@ export function DeliverStopScreen({ route, navigation }: Props) {
 
       <Button title="Submit delivery" onPress={handleSubmit} />
 
-      <Modal visible={scannerOpen} animationType="slide">
+      <Modal visible={scanMode !== null} animationType="slide">
         <QrScanner
-          prompt="Container QR scan karein"
+          prompt={scanMode === "EMPTY" ? "Khaali container QR scan karein" : "Container QR scan karein"}
           onScanned={(data) => {
-            setScannedContainers((prev) => (prev.includes(data) ? prev : [...prev, data]));
-            setScannerOpen(false);
+            if (scanMode === "EMPTY") {
+              setScannedEmpties((prev) => (prev.includes(data) ? prev : [...prev, data]));
+            } else {
+              setScannedContainers((prev) => (prev.includes(data) ? prev : [...prev, data]));
+            }
+            setScanMode(null);
           }}
         />
-        <Button title="Cancel" onPress={() => setScannerOpen(false)} />
+        <Button title="Cancel" onPress={() => setScanMode(null)} />
       </Modal>
     </ScrollView>
   );
@@ -196,7 +203,6 @@ const styles = StyleSheet.create({
   expected: { color: "#555" },
   sectionTitle: { fontWeight: "600", marginTop: 12 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  count: { fontSize: 18, minWidth: 32, textAlign: "center" },
   warn: { color: "#c62828", flex: 1 },
   input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10 },
 });
