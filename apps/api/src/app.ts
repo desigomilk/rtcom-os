@@ -3,7 +3,9 @@ import { BusinessRuleError } from "@rtcom/business-rules";
 import Fastify, { type FastifyError } from "fastify";
 import { ZodError } from "zod";
 import authPlugin from "./plugins/auth";
+import accountingRoutes from "./routes/accounting";
 import authRoutes from "./routes/auth";
+import billingRoutes from "./routes/billing";
 import customerRoutes from "./routes/customers";
 import deliveryRoutes from "./routes/delivery";
 import geographyRoutes from "./routes/geography";
@@ -45,6 +47,8 @@ export function buildApp() {
   app.register(geographyRoutes);
   app.register(routesManagementRoutes);
   app.register(userRoutes);
+  app.register(billingRoutes);
+  app.register(accountingRoutes);
 
   return app;
 }

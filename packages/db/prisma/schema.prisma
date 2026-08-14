@@ -117,6 +117,23 @@ enum LeadStatus {
   LOST
 }
 
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum JournalSourceType {
+  MANUAL
+  INVOICE
+  PAYMENT
+  PENALTY
+  EXPENSE
+  OPENING_BALANCE
+}
+
 // ---------- Users & Auth ----------
 
 model User {
@@ -308,6 +325,7 @@ model Container {
 
   deliveryScans   DeliveryContainerScan[]
   qrReassignments ContainerQrReassignment[]
+  penaltyCharges  PenaltyCharge[]
 }
 
 // Preserves the traceability chain when a physical container's QR tag is damaged
@@ -391,6 +409,7 @@ model Subscription {
   customerId          String
   customer            Customer           @relation(fields: [customerId], references: [id])
   dailyQuantityLitres Decimal
+  ratePerLitre        Decimal            @default(0) // placeholder until real pricing data is imported
   status              SubscriptionStatus @default(ACTIVE)
   effectiveFrom       DateTime
   createdAt           DateTime           @default(now())
@@ -485,6 +504,7 @@ model Invoice {
   lineItems InvoiceLineItem[]
   payments  Payment[]
 
+  @@unique([customerId, periodStart, periodEnd])
   @@index([customerId, periodStart])
 }
 
@@ -508,13 +528,20 @@ model Payment {
 }
 
 model PenaltyCharge {
-  id         String      @id @default(cuid())
-  customerId String
-  customer   Customer    @relation(fields: [customerId], references: [id])
-  type       PenaltyType
-  amount     Decimal
-  appliedAt  DateTime    @default(now())
-  notes      String?
+  id                 String      @id @default(cuid())
+  customerId         String
+  customer           Customer    @relation(fields: [customerId], references: [id])
+  type               PenaltyType
+  amount             Decimal
+  appliedAt          DateTime    @default(now())
+  notes              String?
+  // Set only for UNRETURNED_BOTTLE_DAILY, so the daily batch job can dedupe —
+  // one charge per container per customer per day, never more.
+  relatedContainerId String?
+  relatedContainer   Container?  @relation(fields: [relatedContainerId], references: [id])
+  periodDate         DateTime?   @db.Date
+
+  @@unique([customerId, type, relatedContainerId, periodDate])
 }
 
 // ---------- Devices / IoT ----------
@@ -573,4 +600,70 @@ model IntentConfirmation {
   parsedIntent        ParsedIntent   @relation(fields: [parsedIntentId], references: [id])
   confirmedAt         DateTime?
   confirmationChannel MessageChannel @default(WHATSAPP)
+}
+
+// ---------- Accounting (full double-entry general ledger) ----------
+//
+// Every money-moving event in the system — an issued invoice, a payment, a
+// penalty, an expense — posts a balanced JournalEntry (sum(debit) ==
+// sum(credit)) against this Chart of Accounts. Reports (ledger, cash book,
+// trial balance, P&L, balance sheet) are all just queries over JournalLine,
+// never a separately-maintained number, so they can never drift out of sync
+// with the underlying transactions.
+
+model ChartOfAccount {
+  id        String           @id @default(cuid())
+  code      String           @unique // e.g. "1000" Cash, "4000" Milk Sales Revenue
+  name      String
+  type      AccountType
+  parentId  String?
+  parent    ChartOfAccount?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children  ChartOfAccount[] @relation("AccountHierarchy")
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+
+  journalLines     JournalLine[]
+  expenses         Expense[]     @relation("ExpenseAccount")
+  paidFromExpenses Expense[]     @relation("PaidFromAccount")
+}
+
+model JournalEntry {
+  id          String            @id @default(cuid())
+  date        DateTime          @db.Date
+  narration   String
+  sourceType  JournalSourceType
+  sourceId    String? // loose reference to the Invoice/Payment/PenaltyCharge/Expense id that caused this posting
+  createdById String?
+  createdAt   DateTime          @default(now())
+
+  lines JournalLine[]
+
+  @@index([date])
+  @@index([sourceType, sourceId])
+}
+
+model JournalLine {
+  id             String         @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry   @relation(fields: [journalEntryId], references: [id])
+  accountId      String
+  account        ChartOfAccount @relation(fields: [accountId], references: [id])
+  debit          Decimal        @default(0)
+  credit         Decimal        @default(0)
+
+  @@index([accountId])
+}
+
+model Expense {
+  id                String         @id @default(cuid())
+  date              DateTime       @db.Date
+  accountId         String // which expense category (Chart of Accounts)
+  account           ChartOfAccount @relation("ExpenseAccount", fields: [accountId], references: [id])
+  paidFromAccountId String // Cash or Bank account it was paid from
+  paidFromAccount   ChartOfAccount @relation("PaidFromAccount", fields: [paidFromAccountId], references: [id])
+  amount            Decimal
+  description       String
+  vendorName        String?
+  journalEntryId    String         @unique
+  createdAt         DateTime       @default(now())
 }

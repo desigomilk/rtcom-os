@@ -26,10 +26,19 @@ export async function applyChangeQuantity(
     throw new BusinessRuleError(`Customer ${payload.customerId} not found`);
   }
 
+  // A quantity-only change must carry the existing rate forward — this isn't
+  // a pricing action, and defaulting to 0 here would silently zero out
+  // billing for the customer's next invoice.
+  const currentSubscription = await prisma.subscription.findFirst({
+    where: { customerId: payload.customerId, status: "ACTIVE" },
+    orderBy: { effectiveFrom: "desc" },
+  });
+
   return prisma.subscription.create({
     data: {
       customerId: payload.customerId,
       dailyQuantityLitres: payload.newDailyQuantityLitres,
+      ratePerLitre: currentSubscription?.ratePerLitre ?? 0,
       status: "ACTIVE",
       effectiveFrom,
     },

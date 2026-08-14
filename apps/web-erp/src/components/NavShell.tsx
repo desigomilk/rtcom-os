@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { href: "/routes", label: "Routes" },
   { href: "/intents", label: "Order Requests" },
   { href: "/deliveries", label: "Deliveries" },
+  { href: "/billing", label: "Billing" },
+  { href: "/accounting", label: "Accounting" },
 ];
 
 export function NavShell({ children }: { children: React.ReactNode }) {

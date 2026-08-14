@@ -78,6 +78,7 @@ export default async function leadRoutes(fastify: FastifyInstance) {
           data: {
             customerId: customer.id,
             dailyQuantityLitres: body.dailyQuantityLitres,
+            ratePerLitre: body.ratePerLitre,
             status: "ACTIVE",
             effectiveFrom: new Date(body.effectiveFrom),
           },

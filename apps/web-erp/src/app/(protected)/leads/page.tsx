@@ -64,6 +64,7 @@ export default function LeadsPage() {
       await api.post(`/leads/${id}/convert`, {
         address: form.get("address"),
         dailyQuantityLitres: Number(form.get("dailyQuantityLitres")),
+        ratePerLitre: Number(form.get("ratePerLitre") || 0),
         effectiveFrom: new Date(String(form.get("effectiveFrom"))).toISOString(),
         routeId: form.get("routeId") || undefined,
       });
@@ -179,6 +180,16 @@ export default function LeadsPage() {
                           <label className="block text-xs text-gray-500">Daily litres</label>
                           <input
                             name="dailyQuantityLitres"
+                            type="number"
+                            step="0.5"
+                            required
+                            className="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Rate per litre (₹)</label>
+                          <input
+                            name="ratePerLitre"
                             type="number"
                             step="0.5"
                             required

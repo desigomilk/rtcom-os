@@ -21,6 +21,7 @@ export const convertLeadSchema = z.object({
   routeId: z.string().optional(),
   address: z.string().min(1),
   dailyQuantityLitres: z.number().positive(),
+  ratePerLitre: z.number().nonnegative().default(0),
   effectiveFrom: z.string().datetime(),
 });
 export type ConvertLeadInput = z.infer<typeof convertLeadSchema>;
