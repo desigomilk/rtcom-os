@@ -1,0 +1,532 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum UserRole {
+  ERP_ADMIN
+  PLANT_STAFF
+  FARM_STAFF
+  DELIVERY_BOY
+}
+
+enum BatchStatus {
+  AT_FARM
+  IN_TRANSIT
+  AT_PLANT
+}
+
+enum ContainerType {
+  BOTTLE
+  BARREL
+  JAR
+}
+
+enum ContainerStatus {
+  FILLED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  LOST
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+}
+
+enum DeliveryStopStatus {
+  PENDING
+  COMPLETE
+  PARTIAL
+  ISSUE
+}
+
+enum PaymentMethod {
+  UPI
+  QR
+  CASH
+  BANK
+}
+
+enum PenaltyType {
+  UNRETURNED_BOTTLE_DAILY
+  LOST_BOTTLE
+  LOST_BARREL
+  AMC
+}
+
+enum DeviceType {
+  RTCOM_1A // chiller/cold-room thermometer
+  RTCOM_1B // master barrel GPS+temp tracker
+  RTCOM_1C // customer chiller monitor
+  RTCOM_2A // mask/uniform/SOP compliance camera
+  RTCOM_2B // Milkofit adulteration test camera
+  RTCOM_2C // bottle-counting camera
+  RTCOM_3A // TICC double-jacket barrel (passive, no telemetry)
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+enum MessageChannel {
+  WHATSAPP
+  VOICE_CALL
+}
+
+enum IntentStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  REJECTED
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+}
+
+enum LeadSource {
+  WHATSAPP
+  CALL
+  REFERRAL
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+// ---------- Users & Auth ----------
+
+model User {
+  id               String   @id @default(cuid())
+  name             String
+  phone            String   @unique
+  passwordHash     String
+  role             UserRole
+  refreshTokenHash String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  farmMilkEntries   FarmMilkEntry[]             @relation("EnteredBy")
+  plantReceipts     PlantReceipt[]              @relation("ReceivedBy")
+  bottlingRuns      BottlingRun[]               @relation("RunBy")
+  deliveryLogs      DeliveryLog[]               @relation("DeliveryBoy")
+  handedOverLogs    DeliveryLog[]               @relation("HandedOverFrom")
+  emptyContainerRecons EmptyContainerReconciliation[] @relation("ReconDeliveryBoy")
+  qrReassignments   ContainerQrReassignment[]   @relation("ReassignedBy")
+  assignedLeads     Lead[]                      @relation("AssignedTo")
+}
+
+// ---------- Geography / Routes ----------
+
+model City {
+  id   String @id @default(cuid())
+  name String @unique
+
+  areas Area[]
+}
+
+model Area {
+  id     String @id @default(cuid())
+  name   String
+  cityId String
+  city   City   @relation(fields: [cityId], references: [id])
+
+  routes Route[]
+  leads  Lead[]
+
+  @@unique([cityId, name])
+}
+
+model Route {
+  id     String  @id @default(cuid())
+  name   String
+  code   String  @unique
+  areaId String?
+  area   Area?   @relation(fields: [areaId], references: [id])
+
+  stops     RouteStop[]
+  customers Customer[]
+}
+
+// ---------- Farm -> Batch -> Plant traceability ----------
+
+model Farm {
+  id        String   @id @default(cuid())
+  name      String
+  ownerName String
+  phone     String
+  village   String
+  createdAt DateTime @default(now())
+
+  milkEntries   FarmMilkEntry[]
+  chillerBlends ChillerBlend[]
+}
+
+model FarmMilkEntry {
+  id                 String   @id @default(cuid())
+  farmId             String
+  farm               Farm     @relation(fields: [farmId], references: [id])
+  litres             Decimal
+  fat                Decimal
+  snf                Decimal
+  adulterationResult Json? // raw RTCOM 2B (Milkofit) result payload
+  enteredById        String
+  enteredBy          User     @relation("EnteredBy", fields: [enteredById], references: [id])
+  timestamp          DateTime @default(now())
+  batchId            String?
+  batch              Batch?   @relation(fields: [batchId], references: [id])
+
+  @@index([farmId, timestamp])
+}
+
+model Batch {
+  id           String      @id @default(cuid())
+  qrCode       String      @unique
+  status       BatchStatus @default(AT_FARM)
+  dispatchedAt DateTime?
+  createdAt    DateTime    @default(now())
+
+  farmMilkEntries FarmMilkEntry[]
+  plantReceipt    PlantReceipt?
+  chillerBlends   ChillerBlend[]
+}
+
+model PlantReceipt {
+  id                 String   @id @default(cuid())
+  batchId            String   @unique
+  batch              Batch    @relation(fields: [batchId], references: [id])
+  receivedAt         DateTime @default(now())
+  fat                Decimal
+  snf                Decimal
+  adulterationResult Json?
+  mismatchFlag       Boolean  @default(false)
+  mismatchNotes      String?
+  receivedById       String
+  receivedBy         User     @relation("ReceivedBy", fields: [receivedById], references: [id])
+}
+
+model Chiller {
+  id             String   @id @default(cuid())
+  name           String
+  capacityLitres Decimal
+  createdAt      DateTime @default(now())
+
+  blends       ChillerBlend[]
+  bottlingRuns BottlingRun[]
+}
+
+// Tracks what % of a chiller's contents came from which farm/batch at a point in time,
+// so a plant-level quality issue (or a client-facing trace lookup) can be traced back
+// to source farms.
+model ChillerBlend {
+  id                  String   @id @default(cuid())
+  chillerId           String
+  chiller             Chiller  @relation(fields: [chillerId], references: [id])
+  batchId             String
+  batch               Batch    @relation(fields: [batchId], references: [id])
+  farmId              String
+  farm                Farm     @relation(fields: [farmId], references: [id])
+  litres              Decimal
+  percentContribution Decimal
+  blendedAt           DateTime @default(now())
+
+  @@index([chillerId, blendedAt])
+}
+
+// ---------- Bottling / Containers ----------
+
+model BottlingRun {
+  id           String   @id @default(cuid())
+  chillerId    String
+  chiller      Chiller  @relation(fields: [chillerId], references: [id])
+  manualCount  Int
+  cameraCount  Int?
+  mismatchFlag Boolean  @default(false)
+  runAt        DateTime @default(now())
+  staffId      String
+  staff        User     @relation("RunBy", fields: [staffId], references: [id])
+
+  containers Container[]
+}
+
+// Generalizes the original "Bottle" model: D2C bottles, B2B barrels, and B2B jars
+// are all containers distinguished by type/variant/seal color (RTCOM 2C reads seal
+// color to tell variants apart).
+model Container {
+  id                String          @id @default(cuid())
+  qrCode            String          @unique
+  containerType     ContainerType
+  variant           String // e.g. "Full Cream 500ml"
+  sealColor         String?
+  status            ContainerStatus @default(FILLED)
+  bottlingRunId     String?
+  bottlingRun       BottlingRun?    @relation(fields: [bottlingRunId], references: [id])
+  currentCustomerId String?
+  currentCustomer   Customer?       @relation(fields: [currentCustomerId], references: [id])
+  createdAt         DateTime        @default(now())
+
+  deliveryScans   DeliveryContainerScan[]
+  qrReassignments ContainerQrReassignment[]
+}
+
+// Preserves the traceability chain when a physical container's QR tag is damaged
+// and must be replaced.
+model ContainerQrReassignment {
+  id             String    @id @default(cuid())
+  containerId    String
+  container      Container @relation(fields: [containerId], references: [id])
+  oldQrCode      String
+  newQrCode      String
+  reason         String
+  reassignedAt   DateTime  @default(now())
+  reassignedById String
+  reassignedBy   User      @relation("ReassignedBy", fields: [reassignedById], references: [id])
+}
+
+// ---------- CRM / Leads ----------
+
+model Lead {
+  id                  String     @id @default(cuid())
+  name                String
+  phone               String
+  source              LeadSource
+  areaId              String?
+  area                Area?      @relation(fields: [areaId], references: [id])
+  status              LeadStatus @default(NEW)
+  assignedToId        String?
+  assignedTo          User?      @relation("AssignedTo", fields: [assignedToId], references: [id])
+  notes               String?
+  convertedCustomerId String?    @unique
+  convertedCustomer   Customer?  @relation(fields: [convertedCustomerId], references: [id])
+  createdAt           DateTime   @default(now())
+
+  @@index([status])
+}
+
+// ---------- Customers, Delivery ----------
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  address   String
+  routeId   String?
+  route     Route?   @relation(fields: [routeId], references: [id])
+  createdAt DateTime @default(now())
+
+  currentContainers Container[]
+  routeStops        RouteStop[]
+  subscriptions     Subscription[]
+  invoices          Invoice[]
+  penaltyCharges    PenaltyCharge[]
+  messages          CustomerMessage[]
+  convertedFromLead Lead?
+}
+
+model RouteStop {
+  id                String   @id @default(cuid())
+  routeId           String
+  route             Route    @relation(fields: [routeId], references: [id])
+  customerId        String
+  customer          Customer @relation(fields: [customerId], references: [id])
+  sequence          Int // manually-set order
+  sequenceOptimized Int? // optimizer-suggested order, once available
+  plannedLat        Decimal?
+  plannedLng        Decimal?
+
+  deliveryLogs DeliveryLog[]
+
+  @@unique([routeId, customerId])
+  @@index([routeId, sequence])
+}
+
+model Subscription {
+  id                  String             @id @default(cuid())
+  customerId          String
+  customer            Customer           @relation(fields: [customerId], references: [id])
+  dailyQuantityLitres Decimal
+  status              SubscriptionStatus @default(ACTIVE)
+  effectiveFrom       DateTime
+  pausedDates         Json? // list of ISO dates this subscription is paused
+  createdAt           DateTime           @default(now())
+
+  @@index([customerId, effectiveFrom])
+}
+
+model DeliveryLog {
+  id            String             @id @default(cuid())
+  routeStopId   String
+  routeStop     RouteStop          @relation(fields: [routeStopId], references: [id])
+  deliveryBoyId String
+  deliveryBoy   User               @relation("DeliveryBoy", fields: [deliveryBoyId], references: [id])
+  date          DateTime           @db.Date
+  status        DeliveryStopStatus @default(PENDING)
+
+  emptyContainersReturned Int @default(0)
+
+  scannedLat Decimal?
+  scannedLng Decimal?
+
+  isManualOverride Boolean @default(false)
+  overrideReason   String?
+  overridePhotoUrl String?
+
+  handedOverFromDeliveryBoyId String?
+  handedOverFromDeliveryBoy   User?     @relation("HandedOverFrom", fields: [handedOverFromDeliveryBoyId], references: [id])
+  handoverAt                  DateTime?
+
+  clientEventId String    @unique // idempotency key from the offline mobile client
+  scannedAt     DateTime?
+  syncedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  containerScans DeliveryContainerScan[]
+
+  @@index([deliveryBoyId, date])
+}
+
+model DeliveryContainerScan {
+  id            String      @id @default(cuid())
+  deliveryLogId String
+  deliveryLog   DeliveryLog @relation(fields: [deliveryLogId], references: [id])
+  containerId   String
+  container     Container   @relation(fields: [containerId], references: [id])
+  scannedAt     DateTime    @default(now())
+}
+
+model EmptyContainerReconciliation {
+  id             String   @id @default(cuid())
+  deliveryBoyId  String
+  deliveryBoy    User     @relation("ReconDeliveryBoy", fields: [deliveryBoyId], references: [id])
+  date           DateTime @db.Date
+  takenCount     Int
+  deliveredCount Int
+  returnedCount  Int
+  discrepancy    Int
+  createdAt      DateTime @default(now())
+
+  @@unique([deliveryBoyId, date])
+}
+
+// ---------- Billing ----------
+
+model Invoice {
+  id          String        @id @default(cuid())
+  customerId  String
+  customer    Customer      @relation(fields: [customerId], references: [id])
+  periodStart DateTime      @db.Date
+  periodEnd   DateTime      @db.Date
+  totalAmount Decimal
+  status      InvoiceStatus @default(DRAFT)
+  createdAt   DateTime      @default(now())
+
+  lineItems InvoiceLineItem[]
+  payments  Payment[]
+
+  @@index([customerId, periodStart])
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+  description String
+  amount      Decimal
+  kind        String // "milk" | "penalty" | "amc" | ...
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id])
+  amount      Decimal
+  method      PaymentMethod
+  referenceId String?
+  paidAt      DateTime      @default(now())
+}
+
+model PenaltyCharge {
+  id         String      @id @default(cuid())
+  customerId String
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  type       PenaltyType
+  amount     Decimal
+  appliedAt  DateTime    @default(now())
+  notes      String?
+}
+
+// ---------- Devices / IoT ----------
+
+model Device {
+  id           String       @id @default(cuid())
+  type         DeviceType
+  serialNumber String       @unique
+  location     String
+  status       DeviceStatus @default(OFFLINE)
+  lastSeenAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  readings DeviceReading[]
+}
+
+model DeviceReading {
+  id         String   @id @default(cuid())
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id])
+  payload    Json // temperature, SOP-breach flags, snapshot/video refs, etc.
+  recordedAt DateTime @default(now())
+
+  @@index([deviceId, recordedAt])
+}
+
+// ---------- Customer messaging / AI intent pipeline (WhatsApp + voice) ----------
+
+model CustomerMessage {
+  id         String         @id @default(cuid())
+  customerId String
+  customer   Customer       @relation(fields: [customerId], references: [id])
+  channel    MessageChannel
+  direction  String // "IN" | "OUT"
+  body       String // message text, or call transcript
+  receivedAt DateTime       @default(now())
+
+  parsedIntents ParsedIntent[]
+}
+
+model ParsedIntent {
+  id         String           @id @default(cuid())
+  messageId  String
+  message    CustomerMessage  @relation(fields: [messageId], references: [id])
+  intentType String // e.g. "PAUSE_SUBSCRIPTION", "ADD_EXTRA"
+  payload    Json
+  status     IntentStatus     @default(PENDING_CONFIRMATION)
+  createdAt  DateTime         @default(now())
+
+  confirmation IntentConfirmation?
+}
+
+model IntentConfirmation {
+  id                  String       @id @default(cuid())
+  parsedIntentId      String       @unique
+  parsedIntent        ParsedIntent @relation(fields: [parsedIntentId], references: [id])
+  confirmedAt         DateTime?
+  confirmationChannel MessageChannel @default(WHATSAPP)
+}
