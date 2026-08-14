@@ -20,3 +20,6 @@ minimumReleaseAgeExclude:
   - expo-server@57.0.3
   - expo@57.0.13
   - expo-location@57.0.10
+  - expo-dev-client@57.0.12
+  - expo-dev-launcher@57.0.12
+  - expo-dev-menu@57.0.12
